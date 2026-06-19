@@ -1,0 +1,29 @@
+Business name:
+Address:
+Phone:
+Email:
+Business type (e.g. bakery, plumbing, hair salon):
+Website (their current site, if any):
+Facebook:
+Instagram:
+Rating:
+Review count:
+Year established:
+Price range:
+Hours:
+Services:
+About:
+Lead reason (why they need a site):
+Notes (anything specific worth referencing on the site):
+
+# The lead scraper (scraper/) and the intake form both write this file in the
+# format above. Fields left blank were simply not found - that's fine, design
+# around what's present.
+#
+# When real customer reviews are available, the scraper appends a section like
+# this below (only ever REAL reviews - never invent one here):
+#
+# Customer reviews (GENUINE - real reviews scraped from Google Maps. These are
+# real, so they may be used as actual testimonials on the site. Do NOT label
+# them as samples; only invented quotes get that):
+# - "Great place, highly recommend." - Jane D., 5*, 2 years ago

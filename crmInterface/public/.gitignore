@@ -1,0 +1,7 @@
+# Generated business-site folders are staged here by scripts/copy-sites.mjs at
+# build time (source of truth is ../businesses). Ignore everything except the
+# app's own committed static assets.
+/*
+!.gitignore
+!favicon.svg
+!icons.svg

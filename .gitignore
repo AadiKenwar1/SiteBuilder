@@ -1,0 +1,23 @@
+# Secrets — never commit real env files (the .example templates are committed).
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Scrape tab — background job log + transient state
+scraper/.run/
+
+# Node
+node_modules/
+
+# Vercel
+.vercel
+
+# OS
+.DS_Store
+Thumbs.db

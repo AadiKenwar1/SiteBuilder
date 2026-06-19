@@ -1,0 +1,4 @@
+scrapling[fetchers]
+httpx
+openpyxl
+supabase

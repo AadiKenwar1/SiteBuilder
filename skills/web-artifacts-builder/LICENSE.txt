@@ -1,0 +1,6 @@
+Web Artifacts Builder skill.
+
+This skill (SKILL.md and the scripts under scripts/) is provided for use within
+this project to scaffold and bundle React + Tailwind + shadcn/ui frontends.
+shadcn/ui components added into generated projects are MIT-licensed by their
+authors. Redistribute per the original skill's terms.
