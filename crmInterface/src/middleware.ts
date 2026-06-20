@@ -4,7 +4,32 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
+// Sends a logged-out request where it belongs: a clean 401 for API calls, the
+// login screen (with a return path) for page navigations.
+function rejectLoggedOut(req: NextRequest): NextResponse {
+  const { pathname } = req.nextUrl
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  }
+  const url = req.nextUrl.clone()
+  url.pathname = "/admin/login"
+  url.searchParams.set("next", pathname)
+  return NextResponse.redirect(url)
+}
+
 export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl
+  const isLogin = pathname === "/admin/login"
+
+  // Fast path: no Supabase auth cookie means the request is definitely logged
+  // out, so skip the auth check entirely (it ran on every request before).
+  const hasAuthCookie = req.cookies
+    .getAll()
+    .some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"))
+  if (!hasAuthCookie) {
+    return isLogin ? NextResponse.next({ request: req }) : rejectLoggedOut(req)
+  }
+
   const res = NextResponse.next({ request: req })
 
   const supabase = createServerClient(
@@ -22,22 +47,15 @@ export async function middleware(req: NextRequest) {
     },
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  const { pathname } = req.nextUrl
-  const isLogin = pathname === "/admin/login"
+  // getClaims() verifies the JWT locally when the project uses asymmetric
+  // signing keys — no network round-trip per request like getUser() did. (With
+  // legacy HS256 secrets it falls back to a getUser call, so this never regresses.)
+  const { data } = await supabase.auth.getClaims()
+  const user = data?.claims ?? null
 
   if (!user && !isLogin) {
-    // API calls get a clean 401; page navigations get sent to the login screen.
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-    }
-    const url = req.nextUrl.clone()
-    url.pathname = "/admin/login"
-    url.searchParams.set("next", pathname)
-    return NextResponse.redirect(url)
+    // Cookie present but invalid/expired (e.g. signed out elsewhere).
+    return rejectLoggedOut(req)
   }
 
   if (user && isLogin) {

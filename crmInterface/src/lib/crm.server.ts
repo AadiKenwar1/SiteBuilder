@@ -52,10 +52,17 @@ function rowToHeader(row: Record<string, unknown>): Lead {
   return out
 }
 
+// The dashboard table only renders/searches/sorts on these columns. Selecting
+// them explicitly avoids hauling the heavy jsonb fields (services, reviews,
+// hours, about, photo_urls) over the wire for every lead. rowToHeader fills the
+// unselected headers with "".
+const LIST_COLS =
+  "status,business_name,business_type,area,email,slug,site_slug,preview_url,score"
+
 export async function listLeads(): Promise<Lead[]> {
   const { data, error } = await supabaseAdmin()
     .from("leads")
-    .select("*")
+    .select(LIST_COLS)
     .order("score", { ascending: false })
   if (error) throw new Error(error.message)
   return (data ?? []).map(rowToHeader)
