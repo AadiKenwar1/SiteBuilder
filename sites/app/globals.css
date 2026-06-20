@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Per-business public designs bring their own CSS (designs/<slug>/styles.css).
+   This file only carries Tailwind (used by the owner admin + shared chrome). */
+html {
+  -webkit-text-size-adjust: 100%;
+}

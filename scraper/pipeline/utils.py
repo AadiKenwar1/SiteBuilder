@@ -66,6 +66,74 @@ def normalize_name(name: str) -> str:
     return re.sub(r'[^a-z0-9\s]', '', name.lower()).strip()
 
 
+# Weekday short key -> full name, in calendar order. The uniform shape every
+# business_content.hours map uses (see SITES-PLATFORM-PLAN.md §4.6).
+_DAYS = [
+    ("mon", "monday"), ("tue", "tuesday"), ("wed", "wednesday"),
+    ("thu", "thursday"), ("fri", "friday"), ("sat", "saturday"), ("sun", "sunday"),
+]
+
+
+def parse_hours(raw: str) -> dict:
+    """Freeform Google-Maps hours string -> uniform {mon..sun} map.
+
+    Each value is a cleaned time range or "Closed". Days not found default to
+    "Closed". Parenthetical notes ("(Juneteenth)") and trailing noise
+    ("Hours might differ") are stripped. Used to seed business_content.hours so
+    every site renders and edits hours the same way.
+    """
+    out = {key: "Closed" for key, _ in _DAYS}
+    if not raw:
+        return out
+    for chunk in re.split(r"[|\n;]+", raw):
+        seg = chunk.strip()
+        if not seg:
+            continue
+        low = seg.lower()
+        key = next(
+            (k for k, full in _DAYS if full in low or re.search(rf"\b{k}\b", low)),
+            None,
+        )
+        if not key:
+            continue
+        val = seg.split(":", 1)[1] if ":" in seg else seg
+        val = re.sub(r"\([^)]*\)", " ", val)                       # drop "(Juneteenth)"
+        val = re.sub(r"hours?\s+might\s+differ", " ", val, flags=re.I)
+        val = re.sub(r"\s+", " ", val).strip(" .-")
+        out[key] = "Closed" if (not val or "closed" in val.lower()) else val
+    return out
+
+
+# Snake_case identifiers (connection_quality, is_ad, content_category, …) are
+# scraper/internal metadata that occasionally leaks into the Services field —
+# never a real menu item. Drop them so they don't seed business_content.
+_METADATA_TOKEN = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)+$")
+
+
+def parse_services(raw: str) -> list[dict]:
+    """Comma/newline/pipe-separated services string -> [{name,description,price}].
+
+    Deduplicates case-insensitively and preserves order. Drops snake_case
+    metadata tokens that aren't real services. Empty/all-junk input -> []. Seeds
+    business_content.services; the owner (or the site builder) refines it later.
+    """
+    if not raw:
+        return []
+    out, seen = [], set()
+    for item in re.split(r"[,\n;|]+", raw):
+        name = re.sub(r"\s+", " ", item).strip(" .-")
+        if not name:
+            continue
+        if _METADATA_TOKEN.match(name):     # e.g. "connection_quality", "is_ad"
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"name": name, "description": "", "price": ""})
+    return out
+
+
 async def dismiss_consent(page: Page):
     for sel in [
         'button[aria-label*="Accept all"]',

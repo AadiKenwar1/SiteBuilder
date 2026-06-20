@@ -226,3 +226,57 @@ def upload_lead_photos(slug: str, folder: str) -> list[str]:
 
     urls.sort(key=lambda u: (0 if "/hero" in u else 1, u))
     return urls
+
+
+# ── business_content (the editable per-site content the sites/ app renders) ────
+# Separate from `leads`: seeded by promote.py, edited by the owner via sites/.
+# See supabase/schema.sql and SITES-PLATFORM-PLAN.md.
+def _t_content():
+    """The business_content table, scoped to the cold_pitch schema."""
+    return _db().schema(SCHEMA).table("business_content")
+
+
+# Owner-editable columns — left untouched on a re-promote once a site is live.
+CONTENT_EDITABLE = {
+    "hours", "holidays_note", "phone", "about", "services",
+    "photo_hero_url", "photo_gallery_urls", "facebook_url", "instagram_url",
+}
+# Every column promote.py may seed. Deliberately excludes owner_email and
+# site_status — those are set at onboarding / eject and must survive a re-promote.
+CONTENT_SEED_COLS = {
+    "slug", "business_name", "business_type", "phone", "email", "address",
+    "maps_url", "rating", "review_count", "reviews",
+    "hours", "holidays_note", "about", "services",
+    "photo_hero_url", "photo_gallery_urls", "facebook_url", "instagram_url",
+}
+
+
+def get_content(slug: str) -> dict | None:
+    """One business_content row (raw db columns) or None."""
+    res = _t_content().select("*").eq("slug", slug).limit(1).execute()
+    return res.data[0] if res.data else None
+
+
+def upsert_content(record: dict, preserve_owner_edits: bool = True) -> str:
+    """Seed/refresh one business_content row (service role), keyed on slug.
+
+    Only CONTENT_SEED_COLS are written, so owner_email and site_status set at
+    onboarding/eject always survive. When the row already exists and is 'active'
+    (handed off to the owner), the owner-editable columns are dropped from the
+    payload so a re-promote can never clobber the owner's own edits."""
+    slug = (record.get("slug") or "").strip()
+    if not slug:
+        raise ValueError("upsert_content requires a 'slug'")
+
+    payload = {k: v for k, v in record.items()
+               if k in CONTENT_SEED_COLS and v not in (None, "")}
+    payload["slug"] = slug
+
+    if preserve_owner_edits:
+        existing = get_content(slug)
+        if existing and existing.get("site_status") == "active":
+            for col in CONTENT_EDITABLE:
+                payload.pop(col, None)
+
+    _t_content().upsert(payload, on_conflict="slug").execute()
+    return slug

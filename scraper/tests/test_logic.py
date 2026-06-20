@@ -18,12 +18,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.models import Lead
 from pipeline.scoring import score_lead
-from pipeline.utils import lead_slug
-from pipeline.db import _scraper_payload, HEADER_TO_DB
+from pipeline.utils import lead_slug, parse_hours, parse_services
+from pipeline.db import _scraper_payload, HEADER_TO_DB, CONTENT_SEED_COLS, CONTENT_EDITABLE
 from pipeline.email_finder import clean_emails
 from pipeline.photos import _hi_res, _photo_id
 from pipeline.website_check import check_website_age
-from pipeline.enrichment import scrape_facebook
+from pipeline.enrichment import scrape_facebook, _contains_match, _is_ig_placeholder
+from pipeline.website_check import _is_directory, registrable_domain
 
 
 # ── Test fixtures / helpers ───────────────────────────────────────────────────
@@ -85,6 +86,52 @@ def test_slug_is_stable_and_safe():
     assert lead_slug("Acme", "1 Main St") != lead_slug("Acme", "9 Other Rd"), \
         "different address must disambiguate same-named businesses"
     assert lead_slug("", "") == "biz", "empty input falls back to a usable slug"
+
+
+# ── business_content seeding (hours/services parsers + seed-column contract) ──
+def test_parse_hours_is_uniform_seven_keys():
+    raw = ("Thursday: 9 AM–5 PM | Friday(Juneteenth): 9 AM–6 PM Hours might differ "
+           "| Saturday: 9 AM–5 PM | Sunday: Closed | Monday: Closed "
+           "| Tuesday: 11 AM–5 PM | Wednesday: 9 AM–5 PM")
+    h = parse_hours(raw)
+    assert set(h) == {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}, \
+        "hours map must always have the same seven weekday keys"
+    assert h["mon"] == "Closed" and h["sun"] == "Closed"
+    assert h["tue"] == "11 AM–5 PM"
+    # parenthetical + trailing noise stripped, not left in the value
+    assert h["fri"] == "9 AM–6 PM", f"noise not stripped: {h['fri']!r}"
+
+
+def test_parse_hours_defaults_missing_days_closed():
+    h = parse_hours("Mon: 8am-4pm")
+    assert h["mon"] == "8am-4pm"
+    assert all(h[d] == "Closed" for d in ("tue", "wed", "thu", "fri", "sat", "sun")), \
+        "days absent from the string must default to Closed"
+    assert parse_hours("") == {d: "Closed" for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
+
+
+def test_parse_services_structures_and_dedups():
+    out = parse_services("Full Groom, Bath & Brush, full groom ,, Nail Trim")
+    names = [s["name"] for s in out]
+    assert names == ["Full Groom", "Bath & Brush", "Nail Trim"], f"unexpected: {names}"
+    assert all(set(s) == {"name", "description", "price"} for s in out), "service shape"
+    assert parse_services("") == []
+
+
+def test_parse_services_drops_scraper_metadata():
+    # Snake_case metadata tokens occasionally leak into the Services field; they
+    # are never a real menu item and must not seed business_content.
+    assert parse_services("connection_quality, latency_level, is_ad, content_category") == []
+    names = [s["name"] for s in parse_services("is_ad, Cheese Pie, content_category, Tuna Sub")]
+    assert names == ["Cheese Pie", "Tuna Sub"], f"unexpected: {names}"
+
+
+def test_content_seed_never_touches_owner_or_status():
+    # promote.py seeds CONTENT_SEED_COLS only; owner_email / site_status are set at
+    # onboarding/eject and must survive a re-promote, so they must be absent here.
+    assert {"owner_email", "site_status"}.isdisjoint(CONTENT_SEED_COLS)
+    assert CONTENT_EDITABLE <= CONTENT_SEED_COLS, "editable columns are a subset of seedable ones"
+    assert "slug" in CONTENT_SEED_COLS
 
 
 # ── Scoring ───────────────────────────────────────────────────────────────────
@@ -186,6 +233,71 @@ async def test_scrape_facebook_extracts_meta():
     data = await scrape_facebook("https://facebook.com/acme", FakeClient(get={"facebook.com": FakeResp(html)}))
     assert data["logo_url"] == "https://cdn.test/logo.jpg", "og:image not parsed"
     assert "barbershop" in data["about"].lower(), "og:description not parsed"
+
+
+async def test_scrape_facebook_drops_metadata_tokens():
+    # Metadata tokens like connection_quality must never appear as services,
+    # even when mixed with real item names in the page JSON.
+    html = ('"name":"connection_quality","name":"is_ad",'
+            '"name":"Cheese Pie","name":"content_category","name":"Tuna Sub"')
+    data = await scrape_facebook("https://facebook.com/acme", FakeClient(get={"facebook.com": FakeResp(html)}))
+    services = data.get("services", "")
+    assert "Cheese Pie" in services, "real item must be kept"
+    assert "Tuna Sub" in services, "real item must be kept"
+    assert "connection_quality" not in services, "metadata token must be dropped"
+    assert "is_ad" not in services, "metadata token must be dropped"
+    assert "content_category" not in services, "metadata token must be dropped"
+
+
+def test_contains_match_rejects_wrong_business():
+    # The real bug: a yoga Instagram must not attach to a chiropractor just
+    # because both names contain the state abbreviation "NJ".
+    assert not _contains_match("NJ Animal Chiro", "thisisyoganj"), \
+        "shared 'nj' is not a containment match"
+    assert not _contains_match("NJ Animal Chiro", "This is Yoga NJ"), \
+        "different businesses must not match on display name either"
+    # A nearby pizzeria surfaced by Google should not match the target business.
+    assert not _contains_match("Happy Days Pizzeria", "Pizzeria Capri"), \
+        "neither name is a substring of the other"
+
+
+def test_contains_match_accepts_correct_page():
+    # Handle with a trailing year/suffix still contains the normalized name.
+    assert _contains_match("Joe's Pizzeria", "joespizzeria1974"), \
+        "shorter normalized name sits inside the handle"
+    assert _contains_match("Happy Days Pizzeria", "Happy Days Pizzeria")
+
+
+def test_contains_match_rejects_short_generic_names():
+    # "joes" (4 chars) would be a substring of countless businesses — too short
+    # to count, so it must not match below the minimum length.
+    assert not _contains_match("Joe's", "joeskitchen"), \
+        "names under the min length must not match on containment"
+
+
+def test_directory_filter_blocks_profiles_and_booking():
+    # A Tebra provider profile is NOT the business's own website — must be
+    # treated as a directory so the business stays a lead (the Petris bug).
+    assert _is_directory("https://www.tebra.com/care/practice/petris-chiropractic-113617")
+    assert _is_directory("https://www.yelp.com/biz/joes-pizzeria")
+    assert _is_directory("https://booksy.com/en-us/some-salon")
+    # A real own-domain site must pass through.
+    assert not _is_directory("https://www.fitzpatrickchiropracticllc.com/")
+    assert not _is_directory("https://joespizzeria.com/menu")
+
+
+def test_registrable_domain_strips_www():
+    assert registrable_domain("https://www.example.com/x") == "example.com"
+    assert registrable_domain("http://example.co/y") == "example.co"
+
+
+def test_is_ig_placeholder():
+    assert _is_ig_placeholder(
+        "See Instagram photos and videos from This is Yoga NJ (@thisisyoganj)"
+    ), "Instagram's logged-out boilerplate must be rejected"
+    assert not _is_ig_placeholder(
+        "Family-owned chiropractic care for pets since 2008."
+    ), "a real bio must not be flagged as placeholder"
 
 
 # ── Standalone runner (works without pytest) ──────────────────────────────────

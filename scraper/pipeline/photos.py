@@ -136,8 +136,10 @@ async def download_photos(page: Page, lead: Lead, http_client, photos_root: str)
 
     count = 0
 
-    # Hero: prefer the social logo (CDN url at this point), else first gallery photo.
-    hero_url = lead.logo_url or (gallery[0] if gallery else "")
+    # Hero: use the social logo only when it was verified to belong to this
+    # business (find_social_media ran a name check). Otherwise fall back to the
+    # first real Maps gallery photo so we never use a stranger's logo as hero.
+    hero_url = (lead.logo_url if lead.logo_verified else "") or (gallery[0] if gallery else "")
     if hero_url and await download_image(hero_url, folder / "hero.jpg", http_client):
         lead.logo_url = str(folder / "hero.jpg")
         count += 1

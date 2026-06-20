@@ -10,10 +10,10 @@ from typing import Optional
 import httpx
 from playwright.async_api import Page
 
-from .config import MAX_PER_SEARCH, MAX_REVIEWS, MAX_REVIEWS_SCRAPE, CURRENT_YEAR
+from .config import MAX_PER_SEARCH, MIN_REVIEWS, MAX_REVIEWS, MAX_REVIEWS_SCRAPE, CURRENT_YEAR
 from .models import Lead, Review
 from .utils import delay, safe_text, safe_attr, dismiss_consent
-from .website_check import check_website_age
+from .website_check import check_website_age, confirm_website, registrable_domain
 from .chain_check import is_big_business
 
 
@@ -225,6 +225,11 @@ async def extract_lead(
     if review_count > MAX_REVIEWS:
         print(f"      skip [{name}] -- {review_count} reviews (too popular)")
         return None
+    if review_count < MIN_REVIEWS:
+        # Very few reviews usually means a stale/unclaimed/duplicate listing
+        # (the business's real presence — with its website — lives elsewhere).
+        print(f"      skip [{name}] -- {review_count} reviews (too few)")
+        return None
 
     # Rating
     rating = await safe_text(page, 'div.F7nice span[aria-hidden="true"]', '.MW4etd')
@@ -253,8 +258,18 @@ async def extract_lead(
                 website_url = (await el.get_attribute("href") or "").strip()
                 break
 
+    # A "no website" business often lists its Facebook/Instagram page in the
+    # Maps website slot. Google Maps has already vouched it belongs to this
+    # business, so take it as a verified social URL (no name-matching needed)
+    # and leave the lead as "No website" rather than counting it as a site.
+    maps_facebook = maps_instagram = ""
+    if "facebook.com" in website_url.lower():
+        maps_facebook, website_url = website_url, ""
+    elif "instagram.com" in website_url.lower():
+        maps_instagram, website_url = website_url, ""
+
     if not website_url:
-        lead_reason = "No website"
+        lead_reason = "No website"   # tentative — confirm_website may override below
     else:
         is_outdated, reason = await check_website_age(website_url, http_client)
         if is_outdated:
@@ -292,6 +307,22 @@ async def extract_lead(
     year_established = await _get_year_established(page)
     maps_url         = url.split("?")[0]
 
+    # ── Navigation steps below leave the Maps page; keep them after all
+    #    Maps-page scraping above. ──────────────────────────────────────────────
+
+    # Maps listed no website, but the business may have one that just isn't on
+    # their Maps profile. Confirm via web search before trusting "No website";
+    # if a real (current) site turns up, this isn't a lead.
+    if not website_url:
+        found = await confirm_website(page, name, area, phone, address, http_client)
+        if found:
+            is_outdated, reason = await check_website_age(found, http_client)
+            if not is_outdated:
+                print(f"      skip [{name}] -- website off-Maps ({registrable_domain(found)})")
+                return None
+            website_url = found
+            lead_reason = f"Outdated -- {reason}"
+
     # Chain check — navigates to Google, must be LAST
     if await is_big_business(page, name, website_url, http_client):
         print(f"      skip [{name}] -- chain/big business")
@@ -304,6 +335,8 @@ async def extract_lead(
         maps_url         = maps_url,
         address          = address,
         phone            = phone,
+        facebook_url     = maps_facebook,
+        instagram_url    = maps_instagram,
         rating           = rating,
         review_count     = review_count,
         price_range      = price_range,
@@ -357,7 +390,9 @@ async def scrape_reviews(page: Page, lead: Lead) -> list[Review]:
             'div[data-review-id], div[class*="jftiEf"], div[jslog*="review"]'
         )
 
-        for card in cards[:MAX_REVIEWS_SCRAPE]:
+        # Scan a wider pool than we keep, since only 5-star reviews are retained;
+        # stop once MAX_REVIEWS_SCRAPE of them have been collected.
+        for card in cards[:MAX_REVIEWS_SCRAPE * 4]:
             try:
                 # Reviewer name
                 reviewer = ""
@@ -378,6 +413,12 @@ async def scrape_reviews(page: Page, lead: Lead) -> list[Review]:
                         if m:
                             stars = m.group(1)
                             break
+
+                # Only keep confirmed 5-star reviews — these become real
+                # testimonials on the site, so anything we can't confirm as 5
+                # stars (including an unparsed rating) is dropped.
+                if stars != "5":
+                    continue
 
                 # Date
                 date = ""
@@ -423,6 +464,8 @@ async def scrape_reviews(page: Page, lead: Lead) -> list[Review]:
                     date          = date,
                     text          = text,
                 ))
+                if len(reviews) >= MAX_REVIEWS_SCRAPE:
+                    break
 
             except Exception:
                 continue

@@ -14,7 +14,8 @@ HEADLESS           = True   # False → watch browser / solve CAPTCHAs manually
 TARGET_LEADS       = 50      # Keepers (top-N) enriched + pushed to the CRM
 SCREEN_TARGET      = 100     # Candidates screened & scored before ranking (>= TARGET_LEADS)
 OUTDATED_YEARS     = 10     # Website older than this = outdated
-MAX_REVIEWS        = 200    # Skip businesses with more reviews (chains)
+MIN_REVIEWS        = 5      # Skip businesses with fewer reviews (ghost/stale listings)
+MAX_REVIEWS        = 500    # Skip businesses with more reviews (chains)
 MAX_PER_SEARCH     = 5      # Listings to inspect per category per city (including rejects)
 MAX_REVIEWS_SCRAPE = 10     # Max reviews to scrape per business
 MAX_PHOTOS         = 8      # Real photos to download per kept lead
@@ -33,15 +34,13 @@ NOMINATIM_UA  = "LeadScraper/6.0 contact@example.com"
 
 # ── Google Maps search terms ──────────────────────────────────────────────────
 CATEGORY_SEARCHES = [
-    "hair salon", "barbershop", "nail salon", "auto repair", "mechanic",
-    "plumber", "electrician", "hvac contractor", "roofer", "landscaping",
-    "house cleaning", "painter", "handyman", "locksmith", "pest control",
-    "dentist", "chiropractor", "veterinarian", "physical therapy",
-    "accountant", "tax preparer", "notary", "insurance agent",
-    "restaurant", "cafe", "bakery", "diner", "deli", "pizza place",
-    "florist", "photographer", "pet grooming", "tailor", "shoe repair",
-    "martial arts", "yoga studio", "tutoring center",
-    "flooring contractor", "dry cleaner", "alterations", "jewelry store",
+    "salon and barbershop",
+    "auto repair and mechanic",
+    "landscaping and roofing",
+    "hvac and electrician and plumbing",
+    "restaurant and cafe and bakery",
+    "pet grooming and tattoo shop",
+    "house cleaning and painting and pressure washing",
 ]
 
 # ── Chain / big-business detection ───────────────────────────────────────────

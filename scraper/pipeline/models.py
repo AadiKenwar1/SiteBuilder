@@ -48,5 +48,6 @@ class Lead:
     photo_count:      int = 0    # number of photos saved (incl. hero)
 
     # ── Internal (excluded from output) ───────────────────────────────────────
-    slug:             str = field(default="", repr=False)  # stable identity / folder key
-    website_url:      str = field(default="", repr=False)
+    slug:             str  = field(default="", repr=False)  # stable identity / folder key
+    website_url:      str  = field(default="", repr=False)
+    logo_verified:    bool = field(default=False, repr=False)  # True only when social page name-matched

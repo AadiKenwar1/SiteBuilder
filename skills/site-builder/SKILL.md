@@ -5,10 +5,29 @@ description: How to design and build a one-page mockup website for a small busin
 
 # Site Builder
 
+## Output target (sites platform)
+The bespoke design is now a **content-driven React component** in the shared
+`sites/` app, not a static HTML file:
+- Write `sites/designs/<slug>/Site.tsx` (+ `styles.css`, + `index.ts` that
+  re-exports `default`). Model it on `sites/designs/_reference/` and read the
+  contract/types from `sites/lib/content.ts`.
+- The component takes a single `content: BusinessContent` prop. Read **every**
+  business detail from it (name, phone, hours, about, services, photos, socials,
+  reviews) — never hardcode them, or the owner's later edits won't show. Hide a
+  section when its data is empty.
+- Keep the design self-contained (only `import` its own files + `@/lib/content`)
+  so it can be ejected as a standalone site. Use plain `<img>`, not `next/image`.
+- Register the slug in `sites/lib/designs.ts` (promote.py does this on seed).
+- `noindex` and the page shell are handled by the `[slug]` route — the design
+  itself is just the body.
+
+All the design guidance below still applies; it just lands in `Site.tsx`/
+`styles.css` instead of `index.html`. (Legacy static `businesses/<slug>/site/`
+only applies before the `sites/` app exists — see the CLAUDE.md migration note.)
+
 ## Goal
-Produce a single-page website (`site/index.html` + `site/styles.css`, plus
-any assets) that looks like it was designed specifically for this business -
-not a template with the name swapped in.
+Produce a single-page site that looks like it was designed specifically for this
+business - not a template with the name swapped in.
 
 ## Before you design
 Read `info.txt` fully, then read `skills/impeccable/SKILL.md` completely
@@ -40,8 +59,16 @@ For each business, choose:
   ```
   Use the CSS custom properties it outputs directly in `styles.css`. Do not
   override or second-guess them — they come from the business's own brand.
-  If there is no logo, pick a palette from `skills/ui-ux-pro-max/SKILL.md`
-  that fits the trade and doesn't default to blue-and-white.
+  If there is no logo, **fall back to the real photos**: run `extract-colors.py`
+  on a strong downloaded gallery/Google-review photo (`businesses/<slug>/images/`)
+  to derive a palette hint from the actual space/products. Two caveats — these are
+  an *ambient* mood color (food, interior, signage), not a true logo brand color,
+  so treat the output as a starting hint, not gospel; and run it past impeccable
+  before committing — warm food/interior tones drift straight toward the
+  cream/warm palette impeccable bans, so reject or cool them if so.
+  If there are no usable photos either, pick a palette from
+  `skills/ui-ux-pro-max/SKILL.md` that fits the trade and doesn't default to
+  blue-and-white.
 - **A font pairing** — pick one from `skills/ui-ux-pro-max/SKILL.md`. Match
   the personality: a bakery can afford a warm serif or script accent; a
   contractor probably wants something clean and sturdy. Load via Google Fonts.
@@ -120,6 +147,48 @@ intentional and specific, not generic.
   simple CSS/SVG (shapes, gradients, a small icon set). Don't reach for stock
   photography or placeholder images - they read as unfinished.
 
+## Motion and animation
+`motion` is installed in every site. Import from `motion/react`:
+
+```tsx
+import { motion } from 'motion/react'
+```
+
+**Use it for three things only — don't animate for its own sake:**
+
+1. **Section scroll reveals** — every major section fades up as it enters the viewport:
+```tsx
+<motion.section
+  initial={{ opacity: 0, y: 24 }}
+  whileInView={{ opacity: 1, y: 0 }}
+  viewport={{ once: true }}
+  transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+>
+```
+
+2. **Hero entrance** — headline and CTA stagger in on load:
+```tsx
+<motion.h1 initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1 }}>
+<motion.p  initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.25 }}>
+<motion.a  initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.4 }}>
+```
+
+3. **CTA hover** — primary button scales slightly on hover:
+```tsx
+<motion.a whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} transition={{ type: 'spring', stiffness: 400, damping: 20 }}>
+```
+
+**Match motion intensity to the business type:**
+- High-end / upscale (salons, restaurants, spas) — use all three, make reveals smooth and deliberate
+- Professional services (lawyers, accountants) — scroll reveals only, no hover scale, keep it invisible
+- Trades / industrial (contractors, auto) — scroll reveals only, slightly faster duration (0.4s)
+
+**Hard rules:**
+- Animate `opacity` and `transform` only — never `height`, `width`, `top`, `left`
+- Always `viewport={{ once: true }}` on scroll reveals — don't repeat on scroll up
+- Add `"use client"` at the top of any component that uses motion
+- No `will-change` unless profiling shows it's needed
+
 ## Common embeds
 Third-party widgets the business could add. Only include one in the mockup
 if `info.txt` notes they already use that service - otherwise mention it as
@@ -134,12 +203,17 @@ a suggestion in `pitch.md`, not in the site itself.
 - **Reviews**: a link to their Google Business or Yelp page, if known.
 
 ## Technical requirements
-- Single `index.html`, separate `styles.css` (vanilla CSS, no build step or
-  framework).
-- Mobile-first and responsive - most of these get opened on a phone.
-- `<meta name="robots" content="noindex, nofollow">` in `<head>`.
-- Real `alt` text on every image.
-- Visible focus states on links/buttons (don't remove the default outline
-  without replacing it).
+- Output is `sites/designs/<slug>/Site.tsx` + `styles.css` + `index.ts`
+  (re-exports default). NOT a static index.html.
+- Add `"use client"` at the top — motion and any interactivity require it.
+- Mobile-first and responsive — most of these get opened on a phone.
+- `noindex` is handled by `[slug]/page.tsx` generateMetadata — do NOT add it
+  to the design component. The design is just the body.
+- Real `alt` text on every image. Use plain `<img>`, not `next/image`.
+- Visible focus states on links/buttons.
+- Fonts: load via Google Fonts `<link>` in the component, or use `@import`
+  in `styles.css`. Only use fonts actually available on Google Fonts —
+  Clash Display, PP Editorial New, and other premium fonts require a paid
+  license/self-hosting and are NOT available by default.
 - No tracking scripts, no analytics, no external dependencies beyond Google
-  Fonts and any embed explicitly justified above.
+  Fonts and any embed explicitly justified in `info.txt`.

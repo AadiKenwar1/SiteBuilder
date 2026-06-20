@@ -38,17 +38,19 @@ from pathlib import Path
 _SCRAPER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRAPER_DIR))
 
-from pipeline.db import load_rows, set_field            # noqa: E402
+from pipeline.db import load_rows, set_field, upsert_content   # noqa: E402
 from pipeline.config import (                           # noqa: E402
     OUTPUT_REVIEWS_CSV, OUTPUT_DIR,
     _PROJECT_ROOT,
 )
-from pipeline.utils import normalize_name               # noqa: E402
+from pipeline.utils import normalize_name, parse_hours, parse_services  # noqa: E402
 
-PROJECT_ROOT  = _PROJECT_ROOT
-BUSINESSES    = PROJECT_ROOT / "businesses"
-REVIEWS_PATH  = Path(OUTPUT_REVIEWS_CSV)
-PHOTOS_ROOT   = Path(OUTPUT_DIR) / "photos"
+PROJECT_ROOT   = _PROJECT_ROOT
+BUSINESSES     = PROJECT_ROOT / "businesses"
+REVIEWS_PATH   = Path(OUTPUT_REVIEWS_CSV)
+PHOTOS_ROOT    = Path(OUTPUT_DIR) / "photos"
+SITES_DESIGNS  = PROJECT_ROOT / "sites" / "designs"
+SITES_REGISTRY = PROJECT_ROOT / "sites" / "lib" / "designs.ts"
 
 
 # Slugs that would collide with the CRM app's own routes (see crmInterface).
@@ -174,6 +176,113 @@ def _copy_photos(src: Path | None, images_dir: Path) -> int:
     return n
 
 
+# ── Sites platform: seed editable content + scaffold the design ───────────────
+def _content_reviews(reviews: list[dict]) -> list[dict]:
+    """Genuine reviews -> business_content shape, keeping only positive (>=4★)
+    ones — negative genuine reviews are real but not testimonials."""
+    out = []
+    for r in reviews:
+        stars_raw = (r.get("Stars") or "").strip()
+        try:
+            stars = int(stars_raw[:1])
+        except (ValueError, IndexError):
+            stars = 0
+        text = " ".join((r.get("Review Text") or "").split())
+        if stars >= 4 and text:
+            out.append({
+                "text": text,
+                "name": (r.get("Reviewer") or "").strip(),
+                "stars": stars_raw,
+                "date": (r.get("Date") or "").strip(),
+            })
+    return out
+
+
+def _seed_content(rec: dict, slug: str, name: str, reviews: list[dict]) -> None:
+    """Upsert the editable business_content row from the CRM lead (preview state).
+    owner_email/site_status are left to onboarding/eject; a re-promote of a live
+    site won't clobber owner edits (see db.upsert_content)."""
+    g = lambda k: (rec.get(k) or "").strip()
+    photo_urls = rec.get("Photo URLs") or []
+    if not isinstance(photo_urls, list):
+        photo_urls = []
+    try:
+        review_count = int(str(rec.get("Reviews") or "0").strip() or 0)
+    except ValueError:
+        review_count = 0
+
+    content = {
+        "slug": slug,
+        "business_name": name,
+        "business_type": g("Business Type"),
+        "phone": g("Phone"),
+        "email": g("Email"),
+        "address": g("Address"),
+        "maps_url": g("Maps URL"),
+        "rating": g("Rating"),
+        "review_count": review_count,
+        "reviews": _content_reviews(reviews),
+        "hours": parse_hours(g("Hours")),
+        "about": g("About"),
+        "services": parse_services(g("Services")),
+        # Scraped socials are NOT published — name-matching can't fully guarantee a
+        # Facebook/Instagram page belongs to this business, so don't risk a wrong
+        # link going live. They stay in the lead (info.txt + leads row) for image/
+        # logo enrichment only; the owner adds their real socials via /<slug>/admin.
+        "facebook_url": "",
+        "instagram_url": "",
+        "photo_hero_url": photo_urls[0] if photo_urls else "",
+        "photo_gallery_urls": photo_urls[1:] if len(photo_urls) > 1 else [],
+    }
+    try:
+        upsert_content(content)
+    except Exception as e:                                    # noqa: BLE001
+        print(f"      content seed warning: {e}")
+
+
+_DESIGN_STARTER = '''// Starter design for {{NAME}}. Replace with a bespoke, content-driven design
+// per skills/site-builder/SKILL.md. Until then it renders the reference design so
+// the preview works. Read every value from `content` — never hardcode business data.
+import Reference from "@/designs/_reference"
+import type { BusinessContent } from "@/lib/content"
+
+export default function Site({ content }: { content: BusinessContent }) {
+  return <Reference content={content} />
+}
+'''
+
+
+def _register_design(slug: str) -> None:
+    """Add this slug to sites/lib/designs.ts so the [slug] route loads its folder.
+    Idempotent; no-op if the registry or marker is missing."""
+    if not SITES_REGISTRY.exists():
+        return
+    text = SITES_REGISTRY.read_text(encoding="utf-8")
+    if f'"{slug}":' in text:
+        return
+    marker = "  // <promote.py inserts"
+    if marker not in text:
+        return
+    line = f'  "{slug}": () => import("@/designs/{slug}"),\n'
+    SITES_REGISTRY.write_text(text.replace(marker, line + marker, 1), encoding="utf-8")
+
+
+def _scaffold_design(slug: str, name: str) -> None:
+    """Create sites/designs/<slug>/ with a working starter and register it. Skips
+    cleanly when the sites/ app isn't present (legacy/static mode) and never
+    clobbers a bespoke Site.tsx that's already been written."""
+    if not SITES_DESIGNS.is_dir():
+        return
+    d = SITES_DESIGNS / slug
+    if (d / "Site.tsx").exists():
+        _register_design(slug)
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "Site.tsx").write_text(_DESIGN_STARTER.replace("{{NAME}}", name), encoding="utf-8")
+    (d / "index.ts").write_text('export { default } from "./Site"\n', encoding="utf-8")
+    _register_design(slug)
+
+
 def promote_one(rec: dict, rows: dict, force: bool) -> str:
     name = (rec.get("Business Name") or "").strip()
     slug = (rec.get("Site Slug") or "").strip()
@@ -184,11 +293,15 @@ def promote_one(rec: dict, rows: dict, force: bool) -> str:
     biz_dir   = BUSINESSES / slug
     images    = biz_dir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    (biz_dir / "site").mkdir(exist_ok=True)
+    # No legacy site/ folder — the design lives in sites/designs/<slug>/ now.
 
     reviews = _reviews_for(name)
     (biz_dir / "info.txt").write_text(_info_txt(rec, reviews), encoding="utf-8")
     nphotos = _copy_photos(_resolve_photos(rec), images)
+
+    # Sites platform: seed the editable content row + scaffold the design folder.
+    _seed_content(rec, slug, name, reviews)
+    _scaffold_design(slug, name)
 
     # Write the slug back into the CRM. The folder now exists ("promoted"); the
     # dashboard shows that as a badge. Status stays the user's manual sales

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python promote.py --help)",
       "Bash(python crm_cli.py list)",
-      "Bash(python crm_cli.py add '{\"Business Name\":\"Smoke Test Cafe\",\"Address\":\"1 Test St, Newark, NJ\",\"Phone\":\"\\(555\\) 111-2222\",\"Business Type\":\"cafe\",\"Score\":\"77\"}')"
+      "Bash(python crm_cli.py add '{\"Business Name\":\"Smoke Test Cafe\",\"Address\":\"1 Test St, Newark, NJ\",\"Phone\":\"\\(555\\) 111-2222\",\"Business Type\":\"cafe\",\"Score\":\"77\"}')",
+      "Bash(gh api *)"
     ]
   }
 }

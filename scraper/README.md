@@ -9,7 +9,9 @@ Requires Supabase credentials in a project-root `.env` (`SUPABASE_URL`, `SUPABAS
 ## How it works
 
 **Phase 1 — Screen**
-Searches Google Maps across every category × city combination in your `states/` folder. For each listing it checks whether the business has no website or an outdated one, filters out chains and over-popular businesses, finds their Facebook and Instagram, and scores them on how likely they are to buy a website.
+Searches Google Maps across every category × city combination in your `states/` folder. For each listing it checks whether the business has no website or an outdated one, filters out chains and over-popular businesses (and very-low-review ghost listings), finds their Facebook and Instagram, and scores them on how likely they are to buy a website.
+
+When a listing has no website link on Maps, it doesn't trust that at face value: many businesses have a site they never added to their Maps profile. It web-searches the business and, skipping directories/social/booking platforms, confirms whether a real own-domain site exists (matched by phone or street address). A current off-Maps site drops the lead; an outdated one is kept as "Outdated". A presence that's only a directory/booking profile (Yelp, Tebra, Booksy, …) still counts as "No website".
 
 **Rank**
 Sorts all screened candidates by score. Only the top `TARGET_LEADS` move forward.
@@ -63,7 +65,8 @@ All settings are in `scraper/config.py`.
 | `HEADLESS` | `True` | `False` = visible browser (use this for your first run) |
 | `MAX_PHOTOS` | 8 | Photos downloaded per kept lead |
 | `MAX_REVIEWS_SCRAPE` | 10 | Reviews scraped per kept lead |
-| `MAX_REVIEWS` | 150 | Skip businesses with more reviews than this (likely chains) |
+| `MAX_REVIEWS` | 200 | Skip businesses with more reviews than this (likely chains) |
+| `MIN_REVIEWS` | 5 | Skip businesses with fewer reviews than this (stale/ghost listings) |
 | `OUTDATED_YEARS` | 10 | Websites last updated more than this many years ago count as outdated |
 | `CATEGORY_SEARCHES` | 40 categories | Business types to search on Maps |
 | `SCORE_WEIGHTS` | see config | Tune how each signal affects the likelihood-to-buy score |
@@ -186,7 +189,7 @@ scraper/
   photos.py             Maps photo gallery downloader
   enrichment.py         Facebook / Instagram scraping
   email_finder.py       email search (website → Google → Facebook)
-  website_check.py      outdated-site detection
+  website_check.py      outdated-site detection + off-Maps website confirmation
   chain_check.py        chain / big-business filter
   scoring.py            likelihood-to-buy scorer
   export.py             raw Excel / CSV output

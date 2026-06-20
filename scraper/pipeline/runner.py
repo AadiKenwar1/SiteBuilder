@@ -146,8 +146,18 @@ async def run(areas=None, categories=None, screen_target=None, target_leads=None
                             lead.slug = key
 
                             # Cheap signals only — no downloads, no deep search.
+                            # Pass any social URL Maps already gave us (its
+                            # "website" link) so find_social_media keeps it and
+                            # only searches for the missing platform.
                             lead.facebook_url, lead.instagram_url = \
-                                await find_social_media(page, lead.business_name, area)
+                                await find_social_media(
+                                    page, lead.business_name, area, http_client,
+                                    known_facebook=lead.facebook_url,
+                                    known_instagram=lead.instagram_url,
+                                )
+                            # If a social URL was found it already passed the name
+                            # check inside find_social_media, so its logo is safe.
+                            lead.logo_verified = bool(lead.facebook_url or lead.instagram_url)
                             await enrich_from_social(lead, http_client)
 
                             lead.score = score_lead(lead)
