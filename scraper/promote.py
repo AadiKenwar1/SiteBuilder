@@ -108,6 +108,37 @@ def _resolve_photos(rec: dict) -> Path | None:
     return None
 
 
+def _download_storage_photos(rec: dict, images_dir: Path) -> int:
+    """Fallback for manually-entered leads: if there is no local photo folder
+    but the lead has photo_urls (uploaded via the CRM 'Add lead' form to
+    Supabase Storage), download them into images/ so the design step has the files.
+    Returns the number of files downloaded."""
+    photo_urls = rec.get("Photo URLs") or []
+    if not isinstance(photo_urls, list) or not photo_urls:
+        return 0
+
+    import urllib.request
+
+    _EXT = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif"}
+    n = 0
+    for url in photo_urls:
+        if not url:
+            continue
+        fname = url.rstrip("/").split("/")[-1].split("?")[0]
+        if Path(fname).suffix.lower() not in _EXT:
+            continue
+        dest = images_dir / fname
+        if dest.exists():
+            n += 1
+            continue
+        try:
+            urllib.request.urlretrieve(url, dest)
+            n += 1
+        except Exception as e:
+            print(f"      storage download warning ({fname}): {e}")
+    return n
+
+
 def _reviews_for(business_name: str) -> list[dict]:
     """Genuine reviews for this business from leads/reviews.csv (this run)."""
     if not REVIEWS_PATH.exists():
@@ -297,7 +328,12 @@ def promote_one(rec: dict, rows: dict, force: bool) -> str:
 
     reviews = _reviews_for(name)
     (biz_dir / "info.txt").write_text(_info_txt(rec, reviews), encoding="utf-8")
-    nphotos = _copy_photos(_resolve_photos(rec), images)
+    local_src = _resolve_photos(rec)
+    nphotos = _copy_photos(local_src, images)
+    if nphotos == 0:
+        # No local photo folder — try downloading from Supabase Storage (e.g. a
+        # lead created via the CRM 'Add lead' form with images uploaded there).
+        nphotos = _download_storage_photos(rec, images)
 
     # Sites platform: seed the editable content row + scaffold the design folder.
     _seed_content(rec, slug, name, reviews)

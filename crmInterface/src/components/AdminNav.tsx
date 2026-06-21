@@ -2,11 +2,12 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutList, Radar } from "lucide-react"
+import { LayoutList, Radar, UserPlus } from "lucide-react"
 
 const TABS = [
   { href: "/admin", label: "Leads", icon: LayoutList },
   { href: "/admin/scrape", label: "Scrape", icon: Radar },
+  { href: "/admin/new", label: "Add lead", icon: UserPlus },
 ]
 
 // Two-tab nav for the admin header (Leads / Scrape). Sits on the dark header bar.

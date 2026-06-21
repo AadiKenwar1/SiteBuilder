@@ -54,6 +54,7 @@ COLUMNS = [
     ("Contacted On",   "contacted_on",      None),
     ("Slug",           "slug",              None),
     ("Photos Path",    "photos_path",       None),
+    ("Source",         "source",            None),
 ]
 
 HEADER_TO_DB = {h: c for h, c, _ in COLUMNS}

@@ -47,12 +47,16 @@ create table if not exists cold_pitch.leads (
   price_range       text not null default '',
 
   -- bridge/system
+  source            text not null default 'scraper',   -- 'scraper' | 'manual'
   photos_path       text not null default '',          -- local photo folder (scraper machine)
   photo_urls        jsonb not null default '[]'::jsonb, -- public Storage URLs for the CRM gallery
 
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
+
+-- Migration: add source column if this schema was applied before it existed.
+alter table cold_pitch.leads add column if not exists source text not null default 'scraper';
 
 create index if not exists leads_score_idx     on cold_pitch.leads (score desc);
 create index if not exists leads_site_slug_idx on cold_pitch.leads (site_slug);

@@ -48,6 +48,17 @@ export const api = {
   build: (slug: string) =>
     req<{ ok: true; slug: string }>(`${slugPath(slug)}/build`, { method: "POST" }),
   remove: (slug: string) => req<{ ok: true }>(slugPath(slug), { method: "DELETE" }),
+  create: (fields: Record<string, string>) =>
+    req<{ ok: true; slug: string }>(`${BASE}/leads`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    }),
+  uploadPhotos: (slug: string, form: FormData) =>
+    req<{ ok: true; photo_urls: string[] }>(`${slugPath(slug)}/photos`, {
+      method: "POST",
+      body: form,
+    }),
 }
 
 export const scrape = {

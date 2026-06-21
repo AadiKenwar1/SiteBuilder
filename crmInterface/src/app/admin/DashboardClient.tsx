@@ -13,6 +13,7 @@ import {
   Loader2,
   CheckCircle2,
   LogOut,
+  PenLine,
 } from "lucide-react"
 
 import { api, type Lead } from "@/lib/api"
@@ -239,6 +240,11 @@ export function DashboardClient({ initialLeads }: { initialLeads: Lead[] }) {
                         {promoted && (
                           <span className="ml-2 inline-flex items-center gap-1 align-middle text-[11px] font-medium text-green-700">
                             <CheckCircle2 className="h-3.5 w-3.5" /> built
+                          </span>
+                        )}
+                        {lead["Source"] === "manual" && (
+                          <span className="ml-2 inline-flex items-center gap-1 align-middle text-[11px] font-medium text-sky-600">
+                            <PenLine className="h-3.5 w-3.5" /> manual
                           </span>
                         )}
                       </TableCell>
